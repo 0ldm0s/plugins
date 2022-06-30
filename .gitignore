@@ -1,0 +1,5 @@
+*.pyc
+.DS_Store
+/.idea
+celerybeat-schedule.db
+/download_temp/
