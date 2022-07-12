@@ -15,7 +15,7 @@ from mio.util.Logs import LogHandler
 
 
 class QuickMail:
-    VERSION = '0.1'
+    VERSION = '0.2'
     sender: str = ""
     recipients: List[str] = []
     content_type: str = "plain"
@@ -190,7 +190,6 @@ class QuickMail:
                     include_headers=headers,
                 )
                 msg["DKIM-Signature"] = sig[len("DKIM-Signature: "):].decode(charset)
-                pass
             job = threading.Thread(
                 target=self.postman, name=f"postman-{idx}", args=(
                     work_pool, recipient, msg))
