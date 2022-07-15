@@ -9,7 +9,7 @@ from mio.util.Helper import get_root_path, read_txt_file
 
 
 class QuickCache(object):
-    VERSION = '0.12'
+    VERSION = '0.13'
     redis_key: str
 
     def __init__(self, current_app: Optional[Flask] = None):
