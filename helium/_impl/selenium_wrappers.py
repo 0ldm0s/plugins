@@ -1,3 +1,4 @@
+from selenium.webdriver.common.by import By
 from plugins.helium._impl.util.geom import Rectangle
 from selenium.common.exceptions import StaleElementReferenceException, \
     NoSuchFrameException, WebDriverException
@@ -50,18 +51,27 @@ class WebDriverWrapper(Wrapper):
 
     def find_elements_by_name(self, name):
         # Selenium sometimes returns None. For robustness, we turn this into []:
-        return self.target.find_elements_by_name(name) or []
+        if not self.is_chrome():
+            return self.target.find_elements_by_name(name) or []
+        return self.target.find_elements(By.NAME, name) or []
 
     def find_elements_by_xpath(self, xpath):
         # Selenium sometimes returns None. For robustness, we turn this into []:
-        return self.target.find_elements_by_xpath(xpath) or []
+        if not self.is_chrome():
+            return self.target.find_elements_by_xpath(xpath) or []
+        return self.target.find_elements(By.XPATH, xpath) or []
 
     def find_elements_by_css_selector(self, selector):
         # Selenium sometimes returns None. For robustness, we turn this into []:
-        return self.target.find_elements_by_css_selector(selector) or []
+        if not self.is_chrome():
+            return self.target.find_elements_by_css_selector(selector) or []
+        return self.target.find_elements(By.CSS_SELECTOR, selector) or []
 
     def is_firefox(self):
         return self.browser_name == 'firefox'
+
+    def is_chrome(self):
+        return self.browser_name == 'chrome'
 
     @property
     def browser_name(self):

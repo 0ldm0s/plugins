@@ -11,9 +11,11 @@ from plugins import helium
 """
 import re
 import os
+import pickle
 import pycurl
 import shutil
 import zipfile
+import requests
 import subprocess
 from copy import copy
 from io import BytesIO
@@ -33,7 +35,7 @@ from mio.util.Logs import LogHandler
 from mio.util.Helper import get_root_path, get_local_now
 from . import _impl
 
-__version__ = "0.1.3"
+__version__ = "0.1.9"
 
 
 def get_html(url, encode="utf-8") -> str:
@@ -90,16 +92,16 @@ def __get_linux_executable_path__():
 def renew_chromedriver():
     # 只要调用就无条件更新
     console_log = LogHandler('helium.renew_chromedriver')
-    driver_path = _get_api_impl().use_included_web_driver("chromedriver", skip_check=True)
+    driver_path = _get_api_impl()._use_included_web_driver("chromedriver", skip_check=True)
     tmp_list: List[str] = driver_path.split(os.sep)
     system: str = tmp_list[-2]
     driver_name: str = tmp_list[-1]
     if system == "windows":
-        system = "win32"
+        system = "win64"
     elif system == "mac":
-        system = "mac64"
+        system = "mac-x64"
     elif system == "mac_m1":
-        system = "mac64_m1"
+        system = "mac-arm64"
     elif system == "linux":
         system = "linux64"
     else:
@@ -111,7 +113,7 @@ def renew_chromedriver():
         with subprocess.Popen([path, '--version'], stdout=subprocess.PIPE) as proc:
             chrome_version = proc.stdout.read().decode('utf-8').replace('Chromium', '').replace('Google Chrome',
                                                                                                 '').strip()
-    elif system.startswith("mac64"):
+    elif system.startswith("mac"):
         process = subprocess.Popen(['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '--version'],
                                    stdout=subprocess.PIPE)
         chrome_version = process.communicate()[0].decode('UTF-8').replace('Google Chrome', '').strip()
@@ -122,7 +124,7 @@ def renew_chromedriver():
         )
         output = process.communicate()
         if output:
-            chrome_version = output[0].decode('UTF-8').strip().split()[-1]
+            chrome_version = output[0].strip().split()[-1]
         else:
             process = subprocess.Popen(
                 ['powershell', '-command',
@@ -140,13 +142,26 @@ def renew_chromedriver():
         tmp_list = output.split(" ")
         version = tmp_list[1]
         console_log.info(f"Now chromedriver version is: {version}")
-    if chrome_version == version:
+    big_version, *_ = chrome_version.split(".")
+    device_version, *_ = version.split(".")
+    if big_version == device_version:
         console_log.info("Nothing to do, out.")
         return
     download_temp: str = os.path.join(get_root_path(), "download_temp", str(get_local_now()))
     if not os.path.isdir(download_temp):
         os.makedirs(download_temp)
-    download_url = f"https://chromedriver.storage.googleapis.com/{chrome_version}/chromedriver_{system}.zip"
+    # 先获取最新的版本号
+    # version_url: str = f"https://chromedriver.storage.googleapis.com/LATEST_RELEASE_{big_version}"
+    version_url: str = f"https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_{big_version}"
+    r = requests.get(version_url)
+    if r.status_code == 200:
+        chrome_driver_version = r.text
+    else:
+        console_log.info("Network error!.")
+        raise "Network error!"
+    # download_url = f"https://chromedriver.storage.googleapis.com/{chrome_driver_version}/chromedriver_{system}.zip"
+    download_url = f"https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/" \
+                   f"{chrome_driver_version}/{system}/chromedriver-{system}.zip"
     local_filename: str = os.path.join(download_temp, download_url.split('/')[-1])
     is_ok: bool = download_file(download_url, local_filename)
     if not is_ok:
@@ -154,10 +169,12 @@ def renew_chromedriver():
         return
     with zipfile.ZipFile(local_filename, 'r') as zip_ref:
         zip_ref.extractall(download_temp)
-    local_filename = os.path.join(download_temp, driver_name)
+    local_filename = os.path.join(download_temp, f"chromedriver-{system}", driver_name)
     shutil.move(local_filename, driver_path)
     shutil.rmtree(download_temp)
-    if system != "win32":
+    if system != "win32" or system != "win64":
+        # cmd: str = "perl -pi -e 's/cdc_/tuu_/g' {}".format(driver_path)
+        # os.system(cmd)
         make_executable(driver_path)
     console_log.info("Finished, out.")
 
@@ -165,7 +182,7 @@ def renew_chromedriver():
 def renew_msedgedriver():
     # https://developer.microsoft.com/zh-cn/microsoft-edge/tools/webdriver/
     console_log = LogHandler('helium.renew_msedgedriver')
-    driver_path = _get_api_impl().use_included_web_driver("msedgedriver", skip_check=True)
+    driver_path = _get_api_impl()._use_included_web_driver("msedgedriver", skip_check=True)
     tmp_list: List[str] = driver_path.split(os.sep)
     system: str = tmp_list[-2]
     driver_name: str = tmp_list[-1]
@@ -373,10 +390,45 @@ def get_driver() -> WebDriver:
     return _get_api_impl().get_driver_impl()
 
 
+def click_alert() -> bool:
+    driver: WebDriver = get_driver()
+    try:
+        window_before = driver.window_handles[0]
+        alert = driver.switch_to.alert
+        alert.accept()
+        driver.switch_to.window(window_before)
+        return True
+    except Exception as e:
+        str(e)
+    return False
+
+
+def get_current_url() -> str:
+    driver: WebDriver = get_driver()
+    return driver.current_url
+
+
+def get_current_title() -> str:
+    driver: WebDriver = get_driver()
+    return driver.title
+
+
 def get_rendered_source() -> str:
     driver: WebDriver = get_driver()
     html: str = driver.execute_script("return document.getElementsByTagName('html')[0].innerHTML")
     return html
+
+
+def cookies_dumps(filename: str):
+    driver: WebDriver = get_driver()
+    pickle.dump(driver.get_cookies(), open(filename, "wb"))
+
+
+def cookies_loads(filename: str):
+    driver: WebDriver = get_driver()
+    cookies = pickle.load(open(filename, "rb"))
+    for _cookie in cookies:
+        driver.add_cookie(_cookie)
 
 
 def get_page_source() -> str:

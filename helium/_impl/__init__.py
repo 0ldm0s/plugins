@@ -17,7 +17,7 @@ from selenium.common.exceptions import UnexpectedAlertPresentException, \
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support.ui import Select
-from selenium.webdriver import Chrome, ChromeOptions, Edge, EdgeOptions, Firefox, FirefoxOptions, DesiredCapabilities
+from selenium.webdriver import Chrome, ChromeOptions, Edge, EdgeOptions, Firefox, FirefoxOptions, FirefoxProfile
 from time import sleep, time
 
 import atexit
@@ -84,25 +84,27 @@ class APIImpl:
     def __init__(self):
         self.driver = None
 
-    def start_firefox_impl(self, url=None, headless=False, options=None):
-        firefox_driver = self._start_firefox_driver(headless, options)
+    def start_firefox_impl(self, url=None, headless=False, options=None, profile=None):
+        firefox_driver = self._start_firefox_driver(headless, options, profile)
         return self._start(firefox_driver, url)
 
-    def _start_firefox_driver(self, headless, options):
+    def _start_firefox_driver(self, headless, options, profile):
         firefox_options = FirefoxOptions() if options is None else options
+        firefox_profile = FirefoxProfile() if profile is None else profile
         if headless:
             firefox_options.headless = True
         kwargs = {
             'options': firefox_options,
-            'service_log_path': 'nul' if is_windows() else '/dev/null',
-            "desired_capabilities": DesiredCapabilities.CHROME
+            'firefox_profile': firefox_profile,
+            'service_log_path': 'nul' if is_windows() else '/dev/null'
         }
         try:
-            result = Firefox(**kwargs)
-        except WebDriverException:
-            # This usually happens when geckodriver is not on the PATH.
-            driver_path = self.use_included_web_driver('geckodriver')
+            driver_path = self._use_included_web_driver('geckodriver', skip_check=True)
             result = Firefox(executable_path=driver_path, **kwargs)
+            # result = Firefox(**kwargs)
+        except WebDriverException as e:
+            # This usually happens when geckodriver is not on the PATH.
+            raise e
         atexit.register(self._kill_service, result.service)
         return result
 
@@ -116,13 +118,14 @@ class APIImpl:
     def _start_edge_driver(self, headless, maximize, options):
         edge_options = self._get_edge_options(headless, maximize, options)
         try:
-            result = Edge(options=edge_options)
-        except WebDriverException:
-            # This usually happens when chromedriver is not on the PATH.
-            driver_path = self.use_included_web_driver("msedgedriver")
+            driver_path = self._use_included_web_driver("msedgedriver", skip_check=True)
             result = Edge(
                 options=edge_options, executable_path=driver_path
             )
+            # result = Edge(options=edge_options)
+        except WebDriverException as e:
+            # This usually happens when chromedriver is not on the PATH.
+            raise e
         atexit.register(self._kill_service, result.service)
         return result
 
@@ -154,7 +157,7 @@ class APIImpl:
             result = Chrome(options=chrome_options, desired_capabilities=capabilities)
         except WebDriverException:
             # This usually happens when chromedriver is not on the PATH.
-            driver_path = self.use_included_web_driver('chromedriver')
+            driver_path = self._use_included_web_driver("chromedriver", skip_check=True)
             result = Chrome(
                 options=chrome_options, desired_capabilities=capabilities,
                 executable_path=driver_path
@@ -175,8 +178,8 @@ class APIImpl:
             result.add_argument('--start-maximized')
         return result
 
-    def use_included_web_driver(self, driver_name, skip_check=False):
-        self.skip_check = skip_check
+    @staticmethod
+    def _use_included_web_driver(driver_name, skip_check):
         if is_windows():
             driver_name += '.exe'
         driver_path = join(
@@ -469,8 +472,6 @@ class APIImpl:
         driver.switch_to.window(window.handle)
 
     def kill_browser_impl(self):
-        if self.skip_check:
-            return
         self.require_driver().quit()
         self.driver = None
 
@@ -505,8 +506,6 @@ class APIImpl:
         )
 
     def require_driver(self):
-        if self.skip_check:
-            return
         if not self.driver:
             raise RuntimeError(self.DRIVER_REQUIRED_MESSAGE)
         return self.driver
@@ -913,7 +912,7 @@ class HTMLElementImpl(GUIElementImpl):
 
     def _should_yield(self, occurrence, search_regions):
         return occurrence.is_displayed() and \
-               self._is_in_any_search_region(occurrence, search_regions)
+            self._is_in_any_search_region(occurrence, search_regions)
 
     @staticmethod
     def _is_in_any_search_region(element, search_regions):
@@ -1026,7 +1025,7 @@ class TextImpl(HTMLElementContainingText):
                 "not(.//*[normalize-space(.)=normalize-space(self::*)])"
             result = '//*[text() and %s]' % no_descendant_with_same_text
         return result + "[not(self::option)]" + \
-               ("" if self.include_free_text else "[count(*) <= 1]")
+            ("" if self.include_free_text else "[count(*) <= 1]")
 
 
 class FreeText(HTMLElementContainingText):
@@ -1043,10 +1042,10 @@ class LinkImpl(HTMLElementContainingText):
 
     def get_xpath(self):
         return super(LinkImpl, self).get_xpath() + ' | ' + \
-               "//a" + \
-               predicate(self.matches.xpath('@title', self.search_text)) + \
-               ' | ' + "//*[@role='link']" + \
-               predicate(self.matches.xpath('.', self.search_text))
+            "//a" + \
+            predicate(self.matches.xpath('@title', self.search_text)) + \
+            ' | ' + "//*[@role='link']" + \
+            predicate(self.matches.xpath('.', self.search_text))
 
     @property
     def href(self):
@@ -1065,7 +1064,7 @@ class ButtonImpl(HTMLElementContainingText):
     def is_enabled(self):
         aria_disabled = self.first_occurrence.get_attribute('aria-disabled')
         return self._is_enabled() \
-               and (not aria_disabled or aria_disabled.lower() == 'false')
+            and (not aria_disabled or aria_disabled.lower() == 'false')
 
     def get_xpath(self):
         has_aria_label = self.matches.xpath('@aria-label', self.search_text)
@@ -1205,7 +1204,6 @@ class LabelledElement(HTMLElementImpl):
             if elts:
                 # Would like to use a set literal {...} here, but this is not
                 # supported in Python 2.6. Thus we need to use set([...]).
-                # pivots_to_elts[pivot] = set([self._find_closest(pivot, elts)])
                 pivots_to_elts[pivot] = {self._find_closest(pivot, elts)}
 
     def _find_closest(self, to_pivot, among_elts):
@@ -1297,9 +1295,9 @@ class StandardTextFieldWithLabel(LabelledElement):
 
     def get_xpath(self):
         return \
-            "//input[%s='text' or %s='email' or %s='password' or %s='number' " \
-            "or %s='tel' or string-length(@type)=0]" % ((lower('@type'),) * 5) \
-            + " | //textarea | //*[@contenteditable='true']"
+                "//input[%s='text' or %s='email' or %s='password' or %s='number' " \
+                "or %s='tel' or string-length(@type)=0]" % ((lower('@type'),) * 5) \
+                + " | //textarea | //*[@contenteditable='true']"
 
 
 class AriaTextFieldWithLabel(LabelledElement):
@@ -1469,7 +1467,6 @@ class WindowImpl(GUIElementImpl):
             try:
                 self._window_handle_before = self.driver.current_window_handle
             except NoSuchWindowException as window_closed:
-                str(window_closed)
                 do_switch = True
             else:
                 do_switch = self._window_handle_before != self.handle
@@ -1509,7 +1506,7 @@ class AlertImpl(GUIElementImpl):
             # https://code.google.com/p/selenium/issues/detail?id=3544
             msg = e.msg
             if msg and re.match(
-                    r"a\.document\.getElementsByTagName\([^\)]*\)\[0\] is "
+                    r"a\.document\.getElementsByTagName\([^)]*\)\[0] is "
                     r"undefined", msg
             ):
                 sleep(0.25)
