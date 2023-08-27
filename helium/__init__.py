@@ -15,6 +15,7 @@ import pickle
 import pycurl
 import shutil
 import zipfile
+import logging
 import requests
 import subprocess
 from copy import copy
@@ -26,16 +27,20 @@ from collections import namedtuple, OrderedDict
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.webdriver import WebDriver
+from selenium.webdriver.remote.remote_connection import LOGGER
+from urllib3.connectionpool import log as url_logger
 from typing import Optional, List
 from ._impl import APIImpl
 from ._impl.util.html import get_easily_readable_snippet
 from ._impl.util.inspect_ import repr_args
 from ._impl.util.os_ import make_executable
 from mio.util.Logs import LogHandler
-from mio.util.Helper import get_root_path, get_local_now
+from mio.util.Helper import get_root_path, get_local_now, get_canonical_os_name
 from . import _impl
 
-__version__ = "0.1.9"
+__version__ = "0.2.2"
+LOGGER.setLevel(logging.INFO)
+url_logger.setLevel(logging.INFO)
 
 
 def get_html(url, encode="utf-8") -> str:
@@ -94,7 +99,7 @@ def renew_chromedriver():
     console_log = LogHandler('helium.renew_chromedriver')
     driver_path = _get_api_impl()._use_included_web_driver("chromedriver", skip_check=True)
     tmp_list: List[str] = driver_path.split(os.sep)
-    system: str = tmp_list[-2]
+    system: str = get_canonical_os_name()
     driver_name: str = tmp_list[-1]
     if system == "windows":
         system = "win64"
@@ -111,13 +116,14 @@ def renew_chromedriver():
     if system == 'linux64':
         path = __get_linux_executable_path__()
         with subprocess.Popen([path, '--version'], stdout=subprocess.PIPE) as proc:
-            chrome_version = proc.stdout.read().decode('utf-8').replace('Chromium', '').replace('Google Chrome',
-                                                                                                '').strip()
+            chrome_version = proc.stdout.read().decode('utf-8').replace(
+                'Chromium', '').replace('Google Chrome', '').strip()
     elif system.startswith("mac"):
-        process = subprocess.Popen(['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '--version'],
-                                   stdout=subprocess.PIPE)
+        process = subprocess.Popen(
+            ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '--version'],
+            stdout=subprocess.PIPE)
         chrome_version = process.communicate()[0].decode('UTF-8').replace('Google Chrome', '').strip()
-    elif system == 'win32':
+    elif system == 'win64':
         process = subprocess.Popen(
             ['reg', 'query', 'HKEY_CURRENT_USER\\Software\\Google\\Chrome\\BLBeacon', '/v', 'version'],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL
@@ -258,7 +264,7 @@ def start_edge(url=None, headless=False, maximize=False, options=None):
     )
 
 
-def start_chrome(url=None, headless=False, maximize=False, options=None, capabilities=None):
+def start_chrome(url=None, headless=False, maximize=False, options=None):
     """
     :param url: URL to open.
     :type url: str
@@ -269,8 +275,6 @@ def start_chrome(url=None, headless=False, maximize=False, options=None, capabil
     :type maximize: bool
     :param options: ChromeOptions to use for starting the browser
     :type options: :py:class:`selenium.webdriver.ChromeOptions`
-    :param capabilities: DesiredCapabilities to use for starting the browser
-    :type capabilities: :py:class:`selenium.webdriver.DesiredCapabilities`
 
     Starts an instance of Google Chrome::
 
@@ -298,12 +302,6 @@ def start_chrome(url=None, headless=False, maximize=False, options=None, capabil
         options.add_argument('--proxy-server=1.2.3.4:5678')
         start_chrome(options=options)
 
-        from selenium.webdriver import DesiredCapabilities
-        capabilities = DesiredCapabilities.CHROME
-        capabilities["pageLoadStrategy"] = "none"
-        capabilities["goog:loggingPrefs"] = {'performance': 'ALL'}
-        start_chrome(capabilities=capabilities)
-
     On shutdown of the Python interpreter, Helium cleans up all resources used
     for controlling the browser (such as the ChromeDriver process), but does
     not close the browser itself. If you want to terminate the browser at the
@@ -312,7 +310,7 @@ def start_chrome(url=None, headless=False, maximize=False, options=None, capabil
         kill_browser()
     """
     return _get_api_impl().start_chrome_impl(
-        url, headless, maximize, options, capabilities
+        url, headless, maximize, options
     )
 
 

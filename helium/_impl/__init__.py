@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
+import os.path
 from copy import copy
 from plugins.helium._impl.match_type import PREFIX_IGNORE_CASE
 from plugins.helium._impl.selenium_wrappers import WebElementWrapper, \
     WebDriverWrapper, FrameIterator, FramesChangedWhileIterating
 from plugins.helium._impl.util.dictionary import inverse
 from plugins.helium._impl.util.os_ import make_executable
-from plugins.helium._impl.util.system import is_windows, get_canonical_os_name
+from plugins.helium._impl.util.system import is_windows, is_linux, get_canonical_os_name
 from plugins.helium._impl.util.xpath import lower, predicate, predicate_or
 from inspect import getfullargspec, ismethod, isfunction
 from os import access, X_OK
@@ -17,6 +18,9 @@ from selenium.common.exceptions import UnexpectedAlertPresentException, \
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support.ui import Select
+from selenium.webdriver.chrome.service import Service as chromeService
+from selenium.webdriver.edge.service import Service as edgeService
+from selenium.webdriver.firefox.service import Service as firefoxService
 from selenium.webdriver import Chrome, ChromeOptions, Edge, EdgeOptions, Firefox, FirefoxOptions, FirefoxProfile
 from time import sleep, time
 
@@ -94,14 +98,14 @@ class APIImpl:
         if headless:
             firefox_options.headless = True
         kwargs = {
-            'options': firefox_options,
+            # 'options': firefox_options,
             'firefox_profile': firefox_profile,
             'service_log_path': 'nul' if is_windows() else '/dev/null'
         }
         try:
             driver_path = self._use_included_web_driver('geckodriver', skip_check=True)
-            result = Firefox(executable_path=driver_path, **kwargs)
-            # result = Firefox(**kwargs)
+            service = firefoxService(executable_path=driver_path, **kwargs)
+            result = Firefox(options=firefox_options, service=service)
         except WebDriverException as e:
             # This usually happens when geckodriver is not on the PATH.
             raise e
@@ -119,9 +123,8 @@ class APIImpl:
         edge_options = self._get_edge_options(headless, maximize, options)
         try:
             driver_path = self._use_included_web_driver("msedgedriver", skip_check=True)
-            result = Edge(
-                options=edge_options, executable_path=driver_path
-            )
+            service = edgeService(executable_path=driver_path)
+            result = Edge(options=edge_options, service=service)
             # result = Edge(options=edge_options)
         except WebDriverException as e:
             # This usually happens when chromedriver is not on the PATH.
@@ -145,23 +148,20 @@ class APIImpl:
 
     def start_chrome_impl(
             self, url=None, headless=False, maximize=False, options=None,
-            capabilities=None
     ):
         chrome_driver = \
-            self._start_chrome_driver(headless, maximize, options, capabilities)
+            self._start_chrome_driver(headless, maximize, options)
         return self._start(chrome_driver, url)
 
-    def _start_chrome_driver(self, headless, maximize, options, capabilities):
+    def _start_chrome_driver(self, headless, maximize, options):
         chrome_options = self._get_chrome_options(headless, maximize, options)
         try:
-            result = Chrome(options=chrome_options, desired_capabilities=capabilities)
-        except WebDriverException:
-            # This usually happens when chromedriver is not on the PATH.
             driver_path = self._use_included_web_driver("chromedriver", skip_check=True)
-            result = Chrome(
-                options=chrome_options, desired_capabilities=capabilities,
-                executable_path=driver_path
-            )
+            service = chromeService(executable_path=driver_path)
+            result = Chrome(options=chrome_options, service=service)
+        except WebDriverException as e:
+            # This usually happens when chromedriver is not on the PATH.
+            raise e
         atexit.register(self._kill_service, result.service)
         return result
 
@@ -179,13 +179,22 @@ class APIImpl:
         return result
 
     @staticmethod
-    def _use_included_web_driver(driver_name, skip_check):
-        if is_windows():
+    def _use_included_web_driver(driver_name, skip_check: bool = False, use_system: bool = True):
+        driver_path: str = ""
+        if is_linux() and use_system:
+            # 如果是linux，就检查是否存在系统级
+            driver_path = "/usr/bin/chromedriver"
+            if not os.path.isfile(driver_path):
+                driver_path = ""
+            if not access(driver_path, X_OK):
+                driver_path = ""
+        elif is_windows():
             driver_name += '.exe'
-        driver_path = join(
-            dirname(__file__), 'webdrivers', get_canonical_os_name(),
-            driver_name
-        )
+        if len(driver_path) == 0:
+            driver_path = join(
+                dirname(__file__), 'webdrivers', get_canonical_os_name(),
+                driver_name
+            )
         if skip_check:
             return driver_path
         if not access(driver_path, X_OK):
