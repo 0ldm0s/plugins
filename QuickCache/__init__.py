@@ -10,7 +10,7 @@ from mio.util.Helper import get_root_path, read_txt_file
 
 
 class QuickCache(object):
-    VERSION = "0.14"
+    VERSION = "0.15"
     redis_key: str
 
     def __get_logger__(self, name: str) -> LogHandler:
@@ -57,13 +57,15 @@ class QuickCache(object):
             console_log.error(e)
             return 0
 
-    def inc_num(self, key: str, num: int = 1, is_full_key: bool = False) -> Optional[int]:
+    def inc_num(self, key: str, num: int = 1, expiry: int = 0, is_full_key: bool = False) -> Optional[int]:
         console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
             return None
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
         try:
             item = redis_db.incr(redis_key, num)
+            if expiry > 0:
+                redis_db.expire(name=redis_key, time=expiry)
             return item
         except Exception as e:
             console_log.error(e)
