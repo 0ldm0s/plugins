@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import pickle
+import inspect
 from flask import Flask
 from typing import Optional, Any, Tuple, List
 from mio.sys import redis_db
@@ -9,8 +10,12 @@ from mio.util.Helper import get_root_path, read_txt_file
 
 
 class QuickCache(object):
-    VERSION = "0.13"
+    VERSION = "0.14"
     redis_key: str
+
+    def __get_logger__(self, name: str) -> LogHandler:
+        name = f"{self.__class__.__name__}.{name}"
+        return LogHandler(name)
 
     def __init__(self, current_app: Optional[Flask] = None):
         # 如果在cli下使用，则需要显式的传入app
@@ -19,7 +24,7 @@ class QuickCache(object):
         self.redis_key = current_app.config["REDIS_KEY_PREFIX"]
 
     def get_keys(self, key: str, is_full_key: bool = False) -> List[str]:
-        console_log = LogHandler("QuickCache.get_keys")
+        console_log = self.__get_logger__(inspect.stack()[0].function)
         try:
             redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
             keys: Optional[List[bytes]] = redis_db.keys(redis_key)
@@ -29,7 +34,7 @@ class QuickCache(object):
             return []
 
     def lpush(self, key: str, value: Optional[Any] = None, expiry: int = 0, is_full_key: bool = False) -> bool:
-        console_log = LogHandler("QuickCache.lpush")
+        console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
             return False
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
@@ -42,7 +47,7 @@ class QuickCache(object):
             return False
 
     def llen(self, key: str, is_full_key: bool = False) -> int:
-        console_log = LogHandler("QuickCache.llen")
+        console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
             return 0
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
@@ -53,7 +58,7 @@ class QuickCache(object):
             return 0
 
     def inc_num(self, key: str, num: int = 1, is_full_key: bool = False) -> Optional[int]:
-        console_log = LogHandler("QuickCache.inc_num")
+        console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
             return None
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
@@ -65,7 +70,7 @@ class QuickCache(object):
             return None
 
     def dec_num(self, key: str, num: int = 1, is_full_key: bool = False) -> Optional[int]:
-        console_log = LogHandler("QuickCache.dec_num")
+        console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
             return None
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
@@ -77,7 +82,7 @@ class QuickCache(object):
             return None
 
     def rpop(self, key: str, is_full_key: bool = False) -> Optional[Any]:
-        console_log = LogHandler("QuickCache.llen")
+        console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
             return None
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
@@ -91,7 +96,7 @@ class QuickCache(object):
             self, key: str, value: Optional[Any] = None, expiry: int = 0, is_full_key: bool = False,
             is_pickle: bool = True
     ) -> Tuple[bool, Optional[Any]]:
-        console_log = LogHandler("QuickCache.cache")
+        console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
             return False, None
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
@@ -119,8 +124,31 @@ class QuickCache(object):
             console_log.error(e)
             return False, None
 
+    def expire(
+            self, key: str, expiry: int, nx: bool = False, xx: bool = False, gt: bool = False,
+            lt: bool = False, is_full_key: bool = False
+    ) -> bool:
+        """
+        Valid options are:
+            NX -> Set expiry only when the key has no expiry
+            XX -> Set expiry only when the key has an existing expiry
+            GT -> Set expiry only when the new expiry is greater than current one
+            LT -> Set expiry only when the new expiry is less than current one
+
+        For more information see https://redis.io/commands/expire
+        """
+        console_log = self.__get_logger__(inspect.stack()[0].function)
+        if key is None or len(key) <= 0:
+            return False
+        redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
+        try:
+            redis_db.expire(
+                name=redis_key, time=expiry, nx=nx, xx=xx, gt=gt, lt=lt)
+        except Exception as e:
+            console_log.debug(e)
+
     def remove_cache(self, key: str, is_full_key: bool = False):
-        console_log = LogHandler("QuickCache.remove_cache")
+        console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
             return
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
