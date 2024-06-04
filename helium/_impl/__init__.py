@@ -156,7 +156,9 @@ class APIImpl:
     def _start_chrome_driver(self, headless, maximize, options):
         chrome_options = self._get_chrome_options(headless, maximize, options)
         try:
-            driver_path = self._use_included_web_driver("chromedriver", skip_check=True)
+            driver_path = options.binary_location
+            if driver_path is None or len(driver_path) == 0:
+                driver_path = self._use_included_web_driver("chromedriver", skip_check=True)
             service = chromeService(executable_path=driver_path)
             result = Chrome(options=chrome_options, service=service)
         except WebDriverException as e:

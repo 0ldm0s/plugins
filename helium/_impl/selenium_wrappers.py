@@ -51,20 +51,20 @@ class WebDriverWrapper(Wrapper):
 
     def find_elements_by_name(self, name):
         # Selenium sometimes returns None. For robustness, we turn this into []:
-        if not self.is_chrome():
-            return self.target.find_elements_by_name(name) or []
+        # if not self.is_chrome():
+        #     return self.target.find_elements_by_name(name) or []
         return self.target.find_elements(By.NAME, name) or []
 
     def find_elements_by_xpath(self, xpath):
         # Selenium sometimes returns None. For robustness, we turn this into []:
-        if not self.is_chrome():
-            return self.target.find_elements_by_xpath(xpath) or []
+        # if not self.is_chrome():
+        #     return self.target.find_elements_by_xpath(xpath) or []
         return self.target.find_elements(By.XPATH, xpath) or []
 
     def find_elements_by_css_selector(self, selector):
         # Selenium sometimes returns None. For robustness, we turn this into []:
-        if not self.is_chrome():
-            return self.target.find_elements_by_css_selector(selector) or []
+        # if not self.is_chrome():
+        #     return self.target.find_elements_by_css_selector(selector) or []
         return self.target.find_elements(By.CSS_SELECTOR, selector) or []
 
     def is_firefox(self):

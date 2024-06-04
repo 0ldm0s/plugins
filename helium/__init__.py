@@ -28,6 +28,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.remote.remote_connection import LOGGER
+from urllib.parse import urlparse
 from urllib3.connectionpool import log as url_logger
 from typing import Optional, List
 from ._impl import APIImpl
@@ -38,7 +39,7 @@ from mio.util.Logs import LogHandler
 from mio.util.Helper import get_root_path, get_local_now, get_canonical_os_name
 from . import _impl
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 LOGGER.setLevel(logging.INFO)
 url_logger.setLevel(logging.INFO)
 
@@ -56,7 +57,7 @@ def get_html(url, encode="utf-8") -> str:
     return body.decode(encoding=encode, errors="ignore")
 
 
-def download_file(url, filename) -> bool:
+def download_file(url, filename, proxy: str = "") -> bool:
     console_log = LogHandler('helium.download_file')
     try:
         with open(filename, "wb") as fp:
@@ -65,6 +66,14 @@ def download_file(url, filename) -> bool:
             curl.setopt(pycurl.SSL_VERIFYPEER, 1)
             curl.setopt(pycurl.SSL_VERIFYHOST, 2)
             curl.setopt(pycurl.WRITEDATA, fp)
+            if len(proxy) > 0:
+                px = urlparse(proxy)
+                pt = pycurl.PROXYTYPE_HTTP
+                if px.scheme == "socks5":
+                    pt = pycurl.PROXYTYPE_SOCKS5
+                curl.setopt(pycurl.PROXY, px.hostname)
+                curl.setopt(pycurl.PROXYPORT, px.port)
+                curl.setopt(pycurl.PROXYTYPE, pt)
             curl.perform()
             curl.close()
         return True
@@ -94,13 +103,21 @@ def __get_linux_executable_path__():
     raise ValueError("No chrome executable found on PATH")
 
 
-def renew_chromedriver():
+def renew_chromedriver(proxy: str = ""):
     # 只要调用就无条件更新
     console_log = LogHandler('helium.renew_chromedriver')
     driver_path = _get_api_impl()._use_included_web_driver("chromedriver", skip_check=True)
     tmp_list: List[str] = driver_path.split(os.sep)
     system: str = get_canonical_os_name()
-    driver_name: str = tmp_list[-1]
+    driver_name: str = tmp_list.pop(-1)
+    _tmp_list: List[str] = []
+    for _tp in tmp_list:
+        if len(_tp.strip()) == 0:
+            continue
+        _tmp_list.append(_tp.strip())
+    target_path: str = os.path.join("/", *_tmp_list)
+    if not os.path.isdir(target_path):
+        os.makedirs(target_path)
     if system == "windows":
         system = "win64"
     elif system == "mac":
@@ -159,17 +176,19 @@ def renew_chromedriver():
     # 先获取最新的版本号
     # version_url: str = f"https://chromedriver.storage.googleapis.com/LATEST_RELEASE_{big_version}"
     version_url: str = f"https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_{big_version}"
-    r = requests.get(version_url)
+    proxies = None
+    if len(proxy) > 0:
+        proxies = dict(http=proxy, https=proxy)
+    r = requests.get(version_url, proxies=proxies)
     if r.status_code == 200:
         chrome_driver_version = r.text
     else:
         console_log.info("Network error!.")
         raise "Network error!"
-    # download_url = f"https://chromedriver.storage.googleapis.com/{chrome_driver_version}/chromedriver_{system}.zip"
-    download_url = f"https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/" \
+    download_url = f"https://storage.googleapis.com/chrome-for-testing-public/" \
                    f"{chrome_driver_version}/{system}/chromedriver-{system}.zip"
     local_filename: str = os.path.join(download_temp, download_url.split('/')[-1])
-    is_ok: bool = download_file(download_url, local_filename)
+    is_ok: bool = download_file(download_url, local_filename, proxy=proxy)
     if not is_ok:
         console_log.error("Download failed.")
         return
@@ -314,7 +333,7 @@ def start_chrome(url=None, headless=False, maximize=False, options=None):
     )
 
 
-def start_firefox(url=None, headless=False, options=None):
+def start_firefox(url=None, headless=False, options=None, profile=None):
     """
     :param url: URL to open.
     :type url: str
@@ -322,6 +341,8 @@ def start_firefox(url=None, headless=False, options=None):
     :type headless: bool
     :param options: FirefoxOptions to use for starting the browser.
     :type options: :py:class:`selenium.webdriver.FirefoxOptions`
+    :param profile: FirefoxProfile to use for starting the browser.
+    :type profile: :py:class:`selenium.webdriver.FirefoxProfile`
 
     Starts an instance of Firefox::
 
@@ -349,6 +370,24 @@ def start_firefox(url=None, headless=False, options=None):
         options.add_argument("--height=1440")
         start_firefox(options=options)
 
+    To set proxy, useragent, etc. (ie. things you find in about:config), use the
+    `profile` parameter::
+
+        from selenium.webdriver import FirefoxProfile
+        profile = FirefoxProfile()
+        SOCKS5_PROXY_HOST = "0.0.0.0"
+        PROXY_PORT = 0
+        profile.set_preference("network.proxy.type", 1)
+        profile.set_preference("network.proxy.socks", SOCKS5_PROXY_HOST)
+        profile.set_preference("network.proxy.socks_port", PROXY_PORT)
+        profile.set_preference("network.proxy.socks_remote_dns", True)
+        profile.set_preference("network.proxy.socks_version", 5)
+        profile.set_preference("network.proxy.no_proxies_on", "localhost,
+                               10.20.30.40")
+        USER_AGENT = "Mozilla/5.0 ..."
+        profile.set_preference("general.useragent.override", USER_AGENT)
+        start_firefox(profile=profile)
+
     On shutdown of the Python interpreter, Helium cleans up all resources used
     for controlling the browser (such as the geckodriver process), but does
     not close the browser itself. If you want to terminate the browser at the
@@ -356,7 +395,7 @@ def start_firefox(url=None, headless=False, options=None):
 
         kill_browser()
     """
-    return _get_api_impl().start_firefox_impl(url, headless, options)
+    return _get_api_impl().start_firefox_impl(url, headless, options, profile)
 
 
 def go_to(url):

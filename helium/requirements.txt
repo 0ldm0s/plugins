@@ -1,4 +1,5 @@
 selenium
 beautifulsoup4
 pycurl
-requests
+requests[socks]
+urllib3
