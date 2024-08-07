@@ -10,7 +10,7 @@ from mio.util.Helper import get_root_path, read_txt_file
 
 
 class QuickCache(object):
-    VERSION = "0.15"
+    VERSION = "0.2"
     redis_key: str
 
     def __get_logger__(self, name: str) -> LogHandler:
@@ -57,15 +57,13 @@ class QuickCache(object):
             console_log.error(e)
             return 0
 
-    def inc_num(self, key: str, num: int = 1, expiry: int = 0, is_full_key: bool = False) -> Optional[int]:
+    def inc_num(self, key: str, num: int = 1, is_full_key: bool = False) -> Optional[int]:
         console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
             return None
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
         try:
             item = redis_db.incr(redis_key, num)
-            if expiry > 0:
-                redis_db.expire(name=redis_key, time=expiry)
             return item
         except Exception as e:
             console_log.error(e)
@@ -126,29 +124,6 @@ class QuickCache(object):
             console_log.error(e)
             return False, None
 
-    def expire(
-            self, key: str, expiry: int, nx: bool = False, xx: bool = False, gt: bool = False,
-            lt: bool = False, is_full_key: bool = False
-    ) -> bool:
-        """
-        Valid options are:
-            NX -> Set expiry only when the key has no expiry
-            XX -> Set expiry only when the key has an existing expiry
-            GT -> Set expiry only when the new expiry is greater than current one
-            LT -> Set expiry only when the new expiry is less than current one
-
-        For more information see https://redis.io/commands/expire
-        """
-        console_log = self.__get_logger__(inspect.stack()[0].function)
-        if key is None or len(key) <= 0:
-            return False
-        redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
-        try:
-            redis_db.expire(
-                name=redis_key, time=expiry, nx=nx, xx=xx, gt=gt, lt=lt)
-        except Exception as e:
-            console_log.debug(e)
-
     def remove_cache(self, key: str, is_full_key: bool = False):
         console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
@@ -156,6 +131,18 @@ class QuickCache(object):
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
         try:
             redis_db.delete(redis_key)
+        except Exception as e:
+            console_log.debug(e)
+
+    def bulk_remove_cache(self, key: str, is_full_key: bool = False):
+        console_log = self.__get_logger__(inspect.stack()[0].function)
+        if key is None or len(key) <= 0:
+            return
+        redis_key: str = f"{self.redis_key}:Cache:{key}:*" if not is_full_key else key
+        try:
+            keys: List[str] = self.get_keys(redis_key, is_full_key=True)
+            for _k in keys:
+                redis_db.delete(_k)
         except Exception as e:
             console_log.debug(e)
 
