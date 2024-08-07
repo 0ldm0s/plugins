@@ -39,7 +39,7 @@ from mio.util.Logs import LogHandler
 from mio.util.Helper import get_root_path, get_local_now, get_canonical_os_name
 from . import _impl
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 LOGGER.setLevel(logging.INFO)
 url_logger.setLevel(logging.INFO)
 

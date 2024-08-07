@@ -197,6 +197,8 @@ class APIImpl:
                 dirname(__file__), 'webdrivers', get_canonical_os_name(),
                 driver_name
             )
+        if not os.path.isdir(driver_path):
+            os.makedirs(driver_path)
         if skip_check:
             return driver_path
         if not access(driver_path, X_OK):
