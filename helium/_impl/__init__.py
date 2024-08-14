@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import re
+import atexit
 import os.path
 from copy import copy
 from plugins.helium._impl.match_type import PREFIX_IGNORE_CASE
@@ -23,9 +25,7 @@ from selenium.webdriver.edge.service import Service as edgeService
 from selenium.webdriver.firefox.service import Service as firefoxService
 from selenium.webdriver import Chrome, ChromeOptions, Edge, EdgeOptions, Firefox, FirefoxOptions, FirefoxProfile
 from time import sleep, time
-
-import atexit
-import re
+from typing import Optional
 
 
 def might_spawn_window(f):
@@ -92,7 +92,8 @@ class APIImpl:
         firefox_driver = self._start_firefox_driver(headless, options, profile)
         return self._start(firefox_driver, url)
 
-    def _start_firefox_driver(self, headless, options, profile):
+    def _start_firefox_driver(
+            self, headless, options, profile, skip_check: bool = True, use_system: bool = True):
         firefox_options = FirefoxOptions() if options is None else options
         firefox_profile = FirefoxProfile() if profile is None else profile
         if headless:
@@ -103,7 +104,8 @@ class APIImpl:
             'service_log_path': 'nul' if is_windows() else '/dev/null'
         }
         try:
-            driver_path = self._use_included_web_driver('geckodriver', skip_check=True)
+            driver_path = self._use_included_web_driver(
+                'geckodriver', skip_check=skip_check, use_system=use_system)
             service = firefoxService(executable_path=driver_path, **kwargs)
             result = Firefox(options=firefox_options, service=service)
         except WebDriverException as e:
@@ -113,16 +115,21 @@ class APIImpl:
         return result
 
     def start_edge_impl(
-            self, url=None, headless=False, maximize=False, options=None
-    ):
-        edge_driver = \
-            self._start_edge_driver(headless, maximize, options)
+            self, url=None, headless=False, maximize=False, options=None,
+            skip_check: bool = True, use_system: bool = True, driver_path: Optional[str] = None):
+        edge_driver = self._start_edge_driver(
+            headless, maximize, options, skip_check=skip_check, use_system=use_system,
+            driver_path=driver_path)
         return self._start(edge_driver, url)
 
-    def _start_edge_driver(self, headless, maximize, options):
+    def _start_edge_driver(
+            self, headless, maximize, options, skip_check: bool = True, use_system: bool = True,
+            driver_path: Optional[str] = None):
         edge_options = self._get_edge_options(headless, maximize, options)
         try:
-            driver_path = self._use_included_web_driver("msedgedriver", skip_check=True)
+            if driver_path is None:
+                driver_path = self._use_included_web_driver(
+                    "msedgedriver", skip_check=skip_check, use_system=use_system)
             service = edgeService(executable_path=driver_path)
             result = Edge(options=edge_options, service=service)
             # result = Edge(options=edge_options)
@@ -148,17 +155,21 @@ class APIImpl:
 
     def start_chrome_impl(
             self, url=None, headless=False, maximize=False, options=None,
+            skip_check: bool = True, use_system: bool = True, driver_path: Optional[str] = None
     ):
-        chrome_driver = \
-            self._start_chrome_driver(headless, maximize, options)
+        chrome_driver = self._start_chrome_driver(
+            headless, maximize, options, skip_check=skip_check, use_system=use_system,
+            driver_path=driver_path)
         return self._start(chrome_driver, url)
 
-    def _start_chrome_driver(self, headless, maximize, options):
+    def _start_chrome_driver(
+            self, headless, maximize, options, skip_check: bool = True, use_system: bool = True,
+            driver_path: Optional[str] = None):
         chrome_options = self._get_chrome_options(headless, maximize, options)
         try:
-            driver_path = options.binary_location
             if driver_path is None or len(driver_path) == 0:
-                driver_path = self._use_included_web_driver("chromedriver", skip_check=True)
+                driver_path = self._use_included_web_driver(
+                    "chromedriver", skip_check=skip_check, use_system=use_system)
             service = chromeService(executable_path=driver_path)
             result = Chrome(options=chrome_options, service=service)
         except WebDriverException as e:
@@ -185,7 +196,7 @@ class APIImpl:
         driver_path: str = ""
         if is_linux() and use_system:
             # 如果是linux，就检查是否存在系统级
-            driver_path = "/usr/bin/chromedriver"
+            driver_path = "/usr/bin/{}".format(driver_name)
             if not os.path.isfile(driver_path):
                 driver_path = ""
             if not access(driver_path, X_OK):
@@ -193,12 +204,15 @@ class APIImpl:
         elif is_windows():
             driver_name += '.exe'
         if len(driver_path) == 0:
-            driver_path = join(
-                dirname(__file__), 'webdrivers', get_canonical_os_name(),
-                driver_name
-            )
-        if not os.path.isdir(driver_path):
-            os.makedirs(driver_path)
+            root_path: str = join(
+                dirname(__file__), "webdrivers", get_canonical_os_name())
+            # driver_path = join(
+            #     dirname(__file__), 'webdrivers', get_canonical_os_name(),
+            #     driver_name
+            # )
+            if not os.path.isdir(root_path):
+                os.makedirs(root_path)
+            driver_path = join(root_path, driver_name)
         if skip_check:
             return driver_path
         if not access(driver_path, X_OK):

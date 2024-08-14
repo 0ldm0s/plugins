@@ -19,7 +19,6 @@ import logging
 import requests
 import subprocess
 from copy import copy
-from io import BytesIO
 from os import access, X_OK
 from bs4 import BeautifulSoup
 from bs4.element import Tag, ResultSet
@@ -39,22 +38,9 @@ from mio.util.Logs import LogHandler
 from mio.util.Helper import get_root_path, get_local_now, get_canonical_os_name
 from . import _impl
 
-__version__ = "0.2.4"
+__version__ = "0.2.8"
 LOGGER.setLevel(logging.INFO)
 url_logger.setLevel(logging.INFO)
-
-
-def get_html(url, encode="utf-8") -> str:
-    buffer = BytesIO()
-    curl = pycurl.Curl()
-    curl.setopt(pycurl.URL, url)
-    curl.setopt(pycurl.SSL_VERIFYPEER, 1)
-    curl.setopt(pycurl.SSL_VERIFYHOST, 2)
-    curl.setopt(pycurl.WRITEDATA, buffer)
-    curl.perform()
-    curl.close()
-    body = buffer.getvalue()
-    return body.decode(encoding=encode, errors="ignore")
 
 
 def download_file(url, filename, proxy: str = "") -> bool:
@@ -63,8 +49,8 @@ def download_file(url, filename, proxy: str = "") -> bool:
         with open(filename, "wb") as fp:
             curl = pycurl.Curl()
             curl.setopt(pycurl.URL, url)
-            curl.setopt(pycurl.SSL_VERIFYPEER, 1)
-            curl.setopt(pycurl.SSL_VERIFYHOST, 2)
+            curl.setopt(pycurl.SSL_VERIFYPEER, 0)
+            curl.setopt(pycurl.SSL_VERIFYHOST, 0)
             curl.setopt(pycurl.WRITEDATA, fp)
             if len(proxy) > 0:
                 px = urlparse(proxy)
@@ -80,6 +66,21 @@ def download_file(url, filename, proxy: str = "") -> bool:
     except Exception as e:
         console_log.error(e)
         return False
+
+
+def __get_chrome_executable_path__() -> Optional[str]:
+    system: str = get_canonical_os_name()
+    if system.startswith("linux"):
+        return __get_linux_executable_path__()
+    if system.startswith("mac"):
+        return "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    if system.startswith("win"):
+        for i in range(2):
+            path = 'C:\\Program Files' + (' (x86)' if i else '') + \
+                   '\\Google\\Chrome\\Application\\chrome.exe'
+            if os.path.isfile(path):
+                return path
+    return None
 
 
 def __get_linux_executable_path__():
@@ -103,10 +104,45 @@ def __get_linux_executable_path__():
     raise ValueError("No chrome executable found on PATH")
 
 
-def renew_chromedriver(proxy: str = ""):
+def __get_edge_executable_path__() -> Optional[str]:
+    system: str = get_canonical_os_name()
+    if system.startswith("linux"):
+        return __get_edge_linux_executable_path__()
+    if system.startswith("mac"):
+        return "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+    if system.startswith("win"):
+        for i in range(2):
+            path = 'C:\\Program Files' + (' (x86)' if i else '') + \
+                   '\\Microsoft\\Edge\\Application\\msedge.exe'
+            if os.path.isfile(path):
+                return path
+    return None
+
+
+def __get_edge_linux_executable_path__():
+    """
+    Look through a list of candidates for Google Chrome executables that might
+    exist, and return the full path to first one that does. Raise a ValueError
+    if none do.
+    :return: the full path to a Chrome executable on the system
+    """
+    for executable in (
+            "microsoft-edge",
+            "microsoft-edge-stable",
+            "microsoft-edge-beta",
+            "microsoft-edge-dev",
+    ):
+        path = shutil.which(executable)
+        if path is not None:
+            return path
+    raise ValueError("No chrome executable found on PATH")
+
+
+def renew_chromedriver(proxy: str = "", skip_check: bool = True, use_system: bool = True):
     # 只要调用就无条件更新
     console_log = LogHandler('helium.renew_chromedriver')
-    driver_path = _get_api_impl()._use_included_web_driver("chromedriver", skip_check=True)
+    driver_path = _get_api_impl()._use_included_web_driver(
+        "chromedriver", skip_check=skip_check, use_system=use_system)
     tmp_list: List[str] = driver_path.split(os.sep)
     system: str = get_canonical_os_name()
     driver_name: str = tmp_list.pop(-1)
@@ -174,8 +210,8 @@ def renew_chromedriver(proxy: str = ""):
     if not os.path.isdir(download_temp):
         os.makedirs(download_temp)
     # 先获取最新的版本号
-    # version_url: str = f"https://chromedriver.storage.googleapis.com/LATEST_RELEASE_{big_version}"
-    version_url: str = f"https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_{big_version}"
+    version_url: str = "https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_{}".format(
+        big_version)
     proxies = None
     if len(proxy) > 0:
         proxies = dict(http=proxy, https=proxy)
@@ -185,6 +221,7 @@ def renew_chromedriver(proxy: str = ""):
     else:
         console_log.info("Network error!.")
         raise "Network error!"
+    console_log.info(f"Now remote version is: {chrome_driver_version}")
     download_url = f"https://storage.googleapis.com/chrome-for-testing-public/" \
                    f"{chrome_driver_version}/{system}/chromedriver-{system}.zip"
     local_filename: str = os.path.join(download_temp, download_url.split('/')[-1])
@@ -204,86 +241,169 @@ def renew_chromedriver(proxy: str = ""):
     console_log.info("Finished, out.")
 
 
-def renew_msedgedriver():
-    # https://developer.microsoft.com/zh-cn/microsoft-edge/tools/webdriver/
+def renew_msedgedriver(
+        proxy: str = "", skip_check: bool = True, use_system: bool = True):
     console_log = LogHandler('helium.renew_msedgedriver')
-    driver_path = _get_api_impl()._use_included_web_driver("msedgedriver", skip_check=True)
+    driver_path = _get_api_impl()._use_included_web_driver(
+        "msedgedriver", skip_check=skip_check, use_system=use_system)
     tmp_list: List[str] = driver_path.split(os.sep)
     system: str = tmp_list[-2]
     driver_name: str = tmp_list[-1]
     if system == "windows":
         # 暂时无法区分
-        system = "x64"
+        system = "win64"
     elif system == "mac_m1":
-        # 暂时没有mac arm64版，迟早更新再算
-        system = "mac"
+        system = "mac64_m1"
+    elif system == "mac":
+        system = "mac64"
+    elif system == "linux":
+        system = "linux64"
     elif system == "linux_aarch64":
         console_log.error("Not supported system.")
         return
     version: str = ""
+    edge_version: str = ""
+    if system.startswith("linux"):
+        path = __get_edge_linux_executable_path__()
+        with subprocess.Popen([path, '--version'], stdout=subprocess.PIPE) as proc:
+            edge_version = proc.stdout.read().decode('utf-8').replace(
+                'Microsoft Edge', '').strip()
+    elif system.startswith("mac"):
+        process = subprocess.Popen(
+            ['/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge', '--version'],
+            stdout=subprocess.PIPE)
+        edge_version = process.communicate()[0].decode('UTF-8').replace(
+            'Microsoft Edge', '').strip()
+    elif system.startswith("win"):
+        process = subprocess.Popen(
+            ['reg', 'query', 'HKEY_CURRENT_USER\\Software\\Microsoft\\Edge\\BLBeacon',
+             '/v', 'version'],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL
+        )
+        output = process.communicate()
+        if output:
+            edge_version = output[0].strip().split()[-1]
+        else:
+            process = subprocess.Popen(
+                ['powershell', '-command',
+                 '$(Get-ItemProperty -Path '
+                 'Registry::HKEY_CURRENT_USER\\Software\\Microsoft\\Edge\\BLBeacon).version'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE
+            )
+            edge_version = process.communicate()[0].decode('UTF-8').strip()
+    if len(edge_version) == 0:
+        raise "Edge is not installed."
+    console_log.info(f"Now Microsoft Edge version: {edge_version}")
+    edge_sp: List[str] = edge_version.split(".")
+    if len(edge_sp) == 0:
+        raise "Edge version error."
+    edge_sp.pop(-1)
+    big_version = ".".join(edge_sp)
     if os.path.isfile(driver_path) and access(driver_path, X_OK):
-        output: str = subprocess.Popen([driver_path, "-v"], stdout=subprocess.PIPE).communicate()[0].decode("utf-8")
+        output: str = subprocess.Popen(
+            [driver_path, "-v"], stdout=subprocess.PIPE).communicate()[0].decode("utf-8")
         tmp_list = output.split(" ")
         version = tmp_list[3]
-        console_log.info(f"Now msedgedriver version is: {version}")
+        console_log.info(f"Now msedgedriver version: {version}")
+        # 检查版本是否一致
+        if version == edge_version:
+            # 最理想的情况，完全一致
+            return
+        ver_sp: List[str] = version.split(".")
+        if len(ver_sp) == 0:
+            raise "version code error"
+        # 检查大版本是否一致
+        ver_sp.pop(-1)
+        driver_big_version: str = ".".join(ver_sp)
+        if driver_big_version == big_version:
+            # 大版本一致
+            return
     # 检查远端的版本
-    url: str = "https://developer.microsoft.com/zh-cn/microsoft-edge/tools/webdriver/"
-    html: str = get_html(url)
+    version_url: str = "https://developer.microsoft.com/zh-cn/microsoft-edge/tools/webdriver/"
+    proxies = None
+    if len(proxy) > 0:
+        proxies = dict(http=proxy, https=proxy)
+    r = requests.get(version_url, proxies=proxies)
+    if r.status_code == 200:
+        html: str = r.text
+    else:
+        console_log.info("Network error!.")
+        raise "Network error!"
     _soup_: BeautifulSoup = BeautifulSoup(html, "html.parser")
-    metas: ResultSet = _soup_.find_all("p", class_="driver-download__meta")
+    metas: ResultSet = _soup_.find_all("div", class_="block-web-driver__versions")
     if len(metas) == 0:
         console_log.error("Can't loaded remote page.")
         return
-    mtea: Tag = metas[0]
-    tmp_list = mtea.text.split(":")
-    new_version: str = tmp_list[1].strip()
+    # 检查对应的版本是否有对应的系统的版本
+    _mtea: Tag
+    new_version: str = ""
+    download_url: Optional[str] = None
+    for _mtea in metas:
+        if download_url:
+            break
+        _contents = _mtea.contents
+        if len(_contents) != 3:
+            console_log.warning(str(_mtea))
+            continue
+        new_version = str(_contents[1]).strip()
+        if not new_version.startswith(big_version):
+            # 大版本号不一样，跳过
+            continue
+        # 检查是否存在需要的版本
+        download_box: Tag = _contents[2]
+        download_links: List[Tag] = download_box.contents
+        for _dl in download_links:
+            _url: str = _dl.get("href")
+            if not _url.endswith("edgedriver_{}.zip".format(system)):
+                continue
+            download_url = _url
+            break
+    if download_url is None or len(download_url) == 0:
+        raise "download link not found!?"
     console_log.info(f"Now remote version is: {new_version}")
     if new_version == version:
         console_log.info("Is new version, out.")
         return
-    links: ResultSet = mtea.find_all("a")
-    for _link_ in links:
-        # 注意：暂时不支持linux arm64，mac也只有x86_64版
-        # windows arm64暂时无法区分，需要实机
-        # 所以不做细节区分
-        link_name: str = _link_.text.strip().lower()
-        if link_name != system:
-            continue
-        link: str = _link_["href"]
-        download_temp: str = os.path.join(get_root_path(), "download_temp", str(get_local_now()))
-        if not os.path.isdir(download_temp):
-            os.makedirs(download_temp)
-        local_filename: str = os.path.join(download_temp, link.split('/')[-1])
-        is_ok: bool = download_file(link, local_filename)
-        if not is_ok:
-            console_log.error("Download failed.")
-            return
-        with zipfile.ZipFile(local_filename, 'r') as zip_ref:
-            zip_ref.extractall(download_temp)
-        local_filename = os.path.join(download_temp, driver_name)
-        shutil.move(local_filename, driver_path)
-        shutil.rmtree(download_temp)
-        if system != "x64":
-            make_executable(driver_path)
-        break
+    download_temp: str = os.path.join(get_root_path(), "download_temp", str(get_local_now()))
+    if not os.path.isdir(download_temp):
+        os.makedirs(download_temp)
+    local_filename: str = os.path.join(download_temp, download_url.split('/')[-1])
+    is_ok: bool = download_file(download_url, local_filename, proxy=proxy)
+    if not is_ok:
+        raise "Download failed."
+    with zipfile.ZipFile(local_filename, 'r') as zip_ref:
+        zip_ref.extractall(download_temp)
+    local_filename = os.path.join(download_temp, driver_name)
+    shutil.move(local_filename, driver_path)
+    shutil.rmtree(download_temp)
+    if not system.startswith("win"):
+        make_executable(driver_path)
     console_log.info("Finished, out.")
 
 
-def start_edge(url=None, headless=False, maximize=False, options=None):
+def start_edge(
+        url=None, headless=False, maximize=False, options=None,
+        skip_check: bool = False, use_system: bool = True, driver_path: Optional[str] = None):
     """
     使用edge浏览器（推荐）
     :param url: 打开的url
     :param headless: 是否使用无头模式
     :param maximize: 是否使用最大化，无头模式则默认为最大化
     :param options:
+    :param skip_check: 跳过执行权限检测
+    :param use_system: 使用系统级
+    :param driver_path: webdriver路径，留空为自动识别
     :return:
     """
     return _get_api_impl().start_edge_impl(
-        url, headless, maximize, options
+        url, headless, maximize, options,
+        skip_check=skip_check, use_system=use_system, driver_path=driver_path
     )
 
 
-def start_chrome(url=None, headless=False, maximize=False, options=None):
+def start_chrome(
+        url=None, headless=False, maximize=False, options=None,
+        skip_check: bool = False, use_system: bool = True, driver_path: Optional[str] = None):
     """
     :param url: URL to open.
     :type url: str
@@ -294,6 +414,9 @@ def start_chrome(url=None, headless=False, maximize=False, options=None):
     :type maximize: bool
     :param options: ChromeOptions to use for starting the browser
     :type options: :py:class:`selenium.webdriver.ChromeOptions`
+    :param skip_check: skip check dev access
+    :param use_system: use system bin
+    :param driver_path: webdriver path
 
     Starts an instance of Google Chrome::
 
@@ -329,7 +452,8 @@ def start_chrome(url=None, headless=False, maximize=False, options=None):
         kill_browser()
     """
     return _get_api_impl().start_chrome_impl(
-        url, headless, maximize, options
+        url, headless, maximize, options, skip_check=skip_check, use_system=use_system,
+        driver_path=driver_path
     )
 
 
