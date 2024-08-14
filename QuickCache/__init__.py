@@ -10,7 +10,7 @@ from mio.util.Helper import get_root_path, read_txt_file
 
 
 class QuickCache(object):
-    VERSION = "0.2"
+    VERSION = "0.2.1"
     redis_key: str
 
     def __get_logger__(self, name: str) -> LogHandler:
@@ -33,15 +33,17 @@ class QuickCache(object):
             console_log.error(e)
             return []
 
-    def lpush(self, key: str, value: Optional[Any] = None, expiry: int = 0, is_full_key: bool = False) -> bool:
+    def lpush(
+            self, key: str, value: Optional[Any] = None, expiry: Optional[int] = None, is_full_key: bool = False
+    ) -> bool:
         console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
             return False
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
         try:
             redis_db.lpush(redis_key, pickle.dumps(value))
-            if expiry > 0:
-                redis_db.expire(name=redis_key, time=expiry)
+            if expiry and expiry > 0:
+                redis_db.expire(redis_key, time=expiry)
         except Exception as e:
             console_log.error(e)
             return False
@@ -57,29 +59,54 @@ class QuickCache(object):
             console_log.error(e)
             return 0
 
-    def inc_num(self, key: str, num: int = 1, is_full_key: bool = False) -> Optional[int]:
+    def inc_num(
+            self, key: str, num: int = 1, expiry: Optional[int] = None, is_full_key: bool = False
+    ) -> Optional[int]:
         console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
             return None
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
         try:
             item = redis_db.incr(redis_key, num)
+            if expiry and expiry > 0:
+                redis_db.expire(redis_key, time=expiry)
             return item
         except Exception as e:
             console_log.error(e)
             return None
 
-    def dec_num(self, key: str, num: int = 1, is_full_key: bool = False) -> Optional[int]:
+    def dec_num(
+            self, key: str, num: int = 1, expiry: Optional[int] = None, is_full_key: bool = False
+    ) -> Optional[int]:
         console_log = self.__get_logger__(inspect.stack()[0].function)
         if key is None or len(key) <= 0:
             return None
         redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
         try:
             item = redis_db.decr(redis_key, num)
+            if expiry and expiry > 0:
+                redis_db.expire(redis_key, time=expiry)
             return item
         except Exception as e:
             console_log.error(e)
             return None
+
+    def expire(
+            self, key: str, expiry: int, nx: bool = True, xx: bool = False, is_full_key: bool = False
+    ) -> bool:
+        console_log = self.__get_logger__(inspect.stack()[0].function)
+        if key is None or len(key) <= 0:
+            return None
+        redis_key: str = f"{self.redis_key}:Cache:{key}" if not is_full_key else key
+        try:
+            if expiry <= 0:
+                console_log.error("传入的过期时间[{}]为负数或0".format(expiry))
+                return False
+            redis_db.expire(redis_key, time=expiry, nx=nx, xx=xx)
+            return True
+        except Exception as e:
+            console_log.error(e)
+            return False
 
     def rpop(self, key: str, is_full_key: bool = False) -> Optional[Any]:
         console_log = self.__get_logger__(inspect.stack()[0].function)
